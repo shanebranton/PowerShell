@@ -1,1 +1,73 @@
+Clear-Host 
 
+$computers = Get-ADComputer -Filter {Enabled -eq 'true'} -SearchBase 'OU=ExampleComputers,DC=ExampleSub,DC=Example,DC=com'
+$sleep = '60' # Sleep timer in seconds.
+$concurrentJobs = '10'
+$jobTimeout = '20' # Job timeout in seconds.
+
+Write-Output "$(Get-Date)`tRetrieved $($computers.count) computers from AD. Starting jobs..."
+
+Foreach($computer in $computers)
+{
+    $IEVersion = ''
+
+    # Get running jobs.
+    $running = Get-Job -State Running
+
+    # Cleanup running jobs that have been running longer than allowed.
+    Get-Job | Where {$_.State -eq 'Running' -and (($now - $_.PSBeginTime) -gt $jobTimeout)} | Stop-Job
+
+    # Get running jobs again.
+    $running = Get-Job -State Running
+
+    # Check if running jobs is more than allowed and wait if not.
+    If($running.count -ge $concurrentJobs)
+    {
+        # Write-output 'Waiting...'
+        $running | Wait-Job -Any | Out-Null # Wait until any job finishes and suppress output.
+    }
+
+        $computer = $computer.DNSHostName
+        
+            Start-Job -ArgumentList $computer -ScriptBlock `
+            {
+
+                # Check if computer responds to ping.
+                If(-Not(Test-Connection -ComputerName $args[0] -Count 1 -ErrorAction SilentlyContinue))
+                {
+                    Write-Output "$($args[0])`tNo Ping"
+                    Return
+                }
+
+                Try{
+                    $Reg = [Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey('LocalMachine',$args[0])
+                    $RegKey= $Reg.OpenSubKey("SOFTWARE\\Microsoft\\Internet Explorer")
+                    $IEVersion = $RegKey.GetValue("svcVersion")
+
+                    "$($args[0])`t$IEVersion"
+
+                }Catch{
+                    Write-Output "$($args[0])`tNo Remote Registry"
+                }
+
+            } | Out-Null
+}
+
+Write-Output "$(Get-Date)`tAll jobs started. Sleeping for $sleep seconds..."
+
+Start-Sleep -Seconds $sleep
+
+$completedJobs = Get-Job -State Completed 
+
+Write-Host "$(Get-Date)`tWriting jobs out..."
+
+$timeStamp = Get-Date -Format yyyyMMddhhmm
+
+Foreach($completedJob in $completedJobs)
+{
+    $completedJob | Receive-Job | Out-File -FilePath "$PSScriptRoot\IEVersion_$timeStamp.csv" -Append 
+}
+
+$completedJobs | Remove-Job -Force
+
+Write-Host "$(Get-Date)`tCompleted. Check for failed jobs."
