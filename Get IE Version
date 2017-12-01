@@ -1,12 +1,14 @@
 Clear-Host 
 
+# Get list of computers from AD to query against.
 $computers = Get-ADComputer -Filter {Enabled -eq 'true'} -SearchBase 'OU=ExampleComputers,DC=ExampleSub,DC=Example,DC=com'
-$sleep = '60' # Sleep timer in seconds.
-$concurrentJobs = '10'
+$sleep = '60' # Sleep timer in seconds. # How long to sleep after all jobs have started.
+$concurrentJobs = '10' # How many jobs to run concurrently.
 $jobTimeout = '20' # Job timeout in seconds.
 
 Write-Output "$(Get-Date)`tRetrieved $($computers.count) computers from AD. Starting jobs..."
 
+# Iterate through each computer, attempting to pull registry information.
 Foreach($computer in $computers)
 {
     $IEVersion = ''
@@ -20,14 +22,13 @@ Foreach($computer in $computers)
     # Get running jobs again.
     $running = Get-Job -State Running
 
-    # Check if running jobs is more than allowed and wait if not.
+    # Check if running jobs are more than allowed and wait if not.
     If($running.count -ge $concurrentJobs)
     {
-        # Write-output 'Waiting...'
+        # Write-output 'Waiting...' # This will cause your console to fill with a lot of "Waiting..." but can be uncommented to see how things are progressing.
         $running | Wait-Job -Any | Out-Null # Wait until any job finishes and suppress output.
     }
-
-        $computer = $computer.DNSHostName
+        $computer = $computer.DNSHostName # Set the computer variable to only the DNS name, rather than the object from AD.
         
             Start-Job -ArgumentList $computer -ScriptBlock `
             {
@@ -39,35 +40,37 @@ Foreach($computer in $computers)
                     Return
                 }
 
+                # Attempt .NET remote registry. Return value if success.
                 Try{
                     $Reg = [Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey('LocalMachine',$args[0])
                     $RegKey= $Reg.OpenSubKey("SOFTWARE\\Microsoft\\Internet Explorer")
                     $IEVersion = $RegKey.GetValue("svcVersion")
 
                     "$($args[0])`t$IEVersion"
-
+                
+                # If remote registry is unsuccessful, write out "No Remote Registry". This indicates a firewall or service issue.
                 }Catch{
                     Write-Output "$($args[0])`tNo Remote Registry"
                 }
 
-            } | Out-Null
+            } | Out-Null # Suppress jobs outputting as they are started.
 }
 
+# Wait specified time for jobs to finish.
 Write-Output "$(Get-Date)`tAll jobs started. Sleeping for $sleep seconds..."
-
 Start-Sleep -Seconds $sleep
 
+#region Job Management
+
 $completedJobs = Get-Job -State Completed 
-
 Write-Host "$(Get-Date)`tWriting jobs out..."
-
 $timeStamp = Get-Date -Format yyyyMMddhhmm
-
 Foreach($completedJob in $completedJobs)
 {
     $completedJob | Receive-Job | Out-File -FilePath "$PSScriptRoot\IEVersion_$timeStamp.csv" -Append 
 }
-
 $completedJobs | Remove-Job -Force
+
+#endregion
 
 Write-Host "$(Get-Date)`tCompleted. Check for failed jobs."
