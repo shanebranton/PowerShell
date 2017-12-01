@@ -1,22 +1,26 @@
 Clear-Host 
 
+#region Variables
+
 # Get list of computers from AD to query against.
 $computers = Get-ADComputer -Filter {Enabled -eq 'true'} -SearchBase 'OU=ExampleComputers,DC=ExampleSub,DC=Example,DC=com'
-$sleep = '60' # Sleep timer in seconds. # How long to sleep after all jobs have started.
+$sleep = '60' # Sleep timer in seconds. How long to sleep after all jobs have started.
 $concurrentJobs = '10' # How many jobs to run concurrently.
 $jobTimeout = '20' # Job timeout in seconds.
 
-Write-Output "$(Get-Date)`tRetrieved $($computers.count) computers from AD. Starting jobs..."
+#endregion
+
+Write-Output "$(Get-Date)`t`tRetrieved $($computers.count) computers from AD. Starting jobs..."
 
 # Iterate through each computer, attempting to pull registry information.
 Foreach($computer in $computers)
 {
-    $IEVersion = ''
 
     # Get running jobs.
     $running = Get-Job -State Running
 
     # Cleanup running jobs that have been running longer than allowed.
+    $now = Get-Date
     Get-Job | Where {$_.State -eq 'Running' -and (($now - $_.PSBeginTime) -gt $jobTimeout)} | Stop-Job
 
     # Get running jobs again.
@@ -57,13 +61,13 @@ Foreach($computer in $computers)
 }
 
 # Wait specified time for jobs to finish.
-Write-Output "$(Get-Date)`tAll jobs started. Sleeping for $sleep seconds..."
+Write-Output "$(Get-Date)`t`tAll jobs started. Sleeping for $sleep seconds..."
 Start-Sleep -Seconds $sleep
 
 #region Job Management
 
 $completedJobs = Get-Job -State Completed 
-Write-Host "$(Get-Date)`tWriting jobs out..."
+Write-Host "$(Get-Date)`t`tWriting jobs out..."
 $timeStamp = Get-Date -Format yyyyMMddhhmm
 Foreach($completedJob in $completedJobs)
 {
@@ -73,4 +77,4 @@ $completedJobs | Remove-Job -Force
 
 #endregion
 
-Write-Host "$(Get-Date)`tCompleted. Check for failed jobs."
+Write-Host "$(Get-Date)`t`tCompleted. Check for failed jobs."
